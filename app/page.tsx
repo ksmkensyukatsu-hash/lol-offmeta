@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -49,6 +49,9 @@ export default function App() {
   const [selectedChamp, setSelectedChamp] = useState<any>(null);
   const [currentBuilds, setCurrentBuilds] = useState<any[]>([]);
   const [latestBuilds, setLatestBuilds] = useState<any[]>([]);
+
+  // 特定のビルドへスクロールするためのターゲットID
+  const [targetBuildId, setTargetBuildId] = useState<string | null>(null);
 
   // フォーム用ステート
   const [buildTitle, setBuildTitle] = useState('');
@@ -122,14 +125,33 @@ export default function App() {
     }, (err) => console.error("Latest Snapshot error:", err));
   }, [user]);
 
-  const handleOpenDetail = async (id: string) => {
+  // 特定のビルドに自動スクロールする処理
+  useEffect(() => {
+    if (view === 'detail' && targetBuildId && currentBuilds.length > 0) {
+      const timer = setTimeout(() => {
+        const element = document.getElementById(targetBuildId);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // 少し強調表示するためにフラッシュさせる（CSSアニメーション）
+          element.classList.add('animate-highlight');
+          setTimeout(() => element.classList.remove('animate-highlight'), 2000);
+          setTargetBuildId(null); // クリア
+        }
+      }, 500); // 描画待ち
+      return () => clearTimeout(timer);
+    }
+  }, [view, targetBuildId, currentBuilds]);
+
+  const handleOpenDetail = async (champId: string, buildId: string | null = null) => {
     setLoading(true);
+    setTargetBuildId(buildId); // 目的のビルドIDを保存
     try {
-      const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/data/ja_JP/champion/${id}.json`);
+      const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/data/ja_JP/champion/${champId}.json`);
       const data = await res.json();
-      setSelectedChamp(data.data[id]);
+      setSelectedChamp(data.data[champId]);
       navigate('detail');
-      window.scrollTo(0, 0);
+      // ビルド指定がない場合はトップへ
+      if (!buildId) window.scrollTo(0, 0);
     } finally { setLoading(false); }
   };
 
@@ -188,7 +210,6 @@ export default function App() {
     [allItems, itemSearch]
   );
 
-  // ルーン画像の取得先を公式DDragonのCDNに変更
   const getRuneImg = (path: string) => `https://ddragon.leagueoflegends.com/cdn/img/${path}`;
 
   return (
@@ -234,7 +255,7 @@ export default function App() {
                 {filteredChamps.map(c => (
                   <div key={c.id} onClick={() => handleOpenDetail(c.id)} className="cursor-pointer group">
                     <div className="relative overflow-hidden rounded-2xl border-2 border-transparent bg-white p-1 hover:border-[#5383e8] transition-all shadow-lg group-hover:scale-110 group-hover:shadow-2xl group-hover:z-10">
-                      <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${c.image.full}`} className="w-full rounded-xl" />
+                      <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${c.image.full}`} className="w-full rounded-xl" alt="c" />
                     </div>
                     <p className="text-[11px] font-black text-center mt-3 text-gray-500 group-hover:text-gray-900 truncate">{c.name}</p>
                   </div>
@@ -245,9 +266,9 @@ export default function App() {
                 {latestBuilds.length > 0 ? latestBuilds.map(build => {
                   const champ = champions.find(c => c.id === build.championId);
                   return (
-                    <div key={build.id} onClick={() => handleOpenDetail(build.championId)} className="bg-white p-8 rounded-3xl border-2 border-gray-300 hover:border-[#5383e8] flex items-center gap-10 cursor-pointer shadow-lg hover:shadow-2xl transition-all group">
+                    <div key={build.id} onClick={() => handleOpenDetail(build.championId, build.id)} className="bg-white p-8 rounded-3xl border-2 border-gray-300 hover:border-[#5383e8] flex items-center gap-10 cursor-pointer shadow-lg hover:shadow-2xl transition-all group">
                       <div className="relative shrink-0">
-                        <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${build.championId}.png`} className="w-28 h-28 rounded-3xl shadow-lg border-2 border-gray-100 object-cover" />
+                        <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${build.championId}.png`} className="w-28 h-28 rounded-3xl shadow-lg border-2 border-gray-100 object-cover" alt="b" />
                         <div className="absolute -bottom-2 -right-2 bg-[#5383e8] text-white text-[10px] font-black px-3 py-1.5 rounded-full shadow-lg">
                           {champ?.name || build.championId}
                         </div>
@@ -267,7 +288,7 @@ export default function App() {
                     </div>
                   );
                 }) : (
-                  <div className="text-center py-40 text-gray-400 font-black text-2xl border-4 border-dashed rounded-[3rem] border-gray-300">研究データを待機中...</div>
+                  <div className="text-center py-40 text-gray-400 font-black text-2xl border-4 border-dashed rounded-[3rem] border-gray-300 animate-pulse uppercase tracking-[0.5em]">Syncing Research Data...</div>
                 )}
               </div>
             )}
@@ -281,7 +302,7 @@ export default function App() {
             <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]" />
             <div className="max-w-6xl mx-auto px-6 py-20 flex flex-col md:flex-row items-center gap-12 relative z-10">
               <div className="w-48 h-48 border-4 border-[#5383e8] rounded-[2.5rem] overflow-hidden shadow-[0_0_60px_rgba(83,131,232,0.6)] bg-black rotate-3 hover:rotate-0 transition-transform duration-500">
-                <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${selectedChamp.image.full}`} className="w-full h-full object-cover scale-110" />
+                <img src={`https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${selectedChamp.image.full}`} className="w-full h-full object-cover scale-110" alt="c" />
               </div>
               <div className="text-center md:text-left">
                 <h2 className="text-white text-7xl font-black italic tracking-tighter leading-none">{selectedChamp.name}</h2>
@@ -296,7 +317,11 @@ export default function App() {
           <main className="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-4 gap-16">
             <div className="lg:col-span-3 space-y-16">
               {currentBuilds.length > 0 ? currentBuilds.map((build) => (
-                <div key={build.id} className="bg-white p-10 rounded-[3rem] shadow-2xl border-2 border-gray-300 hover:border-[#5383e8] transition-all overflow-hidden relative">
+                <div 
+                  key={build.id} 
+                  id={build.id} 
+                  className="bg-white p-10 rounded-[3rem] shadow-2xl border-2 border-gray-300 hover:border-[#5383e8] transition-all overflow-hidden relative target-flash"
+                >
                   <div className="flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                     <div className="flex-1 flex gap-6">
                       <div className="w-2 h-16 bg-[#5383e8] rounded-full hidden md:block" />
@@ -329,7 +354,6 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-10 bg-[#f8faff] p-10 rounded-[2.5rem] mb-12 border-2 border-[#d6e0f0]">
-                    {/* ルーンセクション (〇●〇 形式) */}
                     <div className="flex flex-col items-center border-r-2 border-[#d6e0f0] pr-8">
                        <span className="text-[10px] font-black text-[#5383e8] uppercase mb-10 tracking-[0.4em]">Genetic Path</span>
                        <div className="flex flex-col gap-6 items-center">
@@ -368,9 +392,7 @@ export default function App() {
                        </div>
                     </div>
 
-                    {/* アイテム ＆ スキルオーダー */}
                     <div className="md:col-span-3 space-y-10">
-                       {/* アイテム */}
                        <div>
                          <span className="text-[10px] font-black text-[#5383e8] uppercase mb-8 tracking-[0.4em] block text-center md:text-left">Core Equipment</span>
                          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
@@ -382,7 +404,6 @@ export default function App() {
                          </div>
                        </div>
 
-                       {/* スキルオーダー */}
                        <div>
                          <span className="text-[10px] font-black text-[#5383e8] uppercase mb-6 tracking-[0.4em] block text-center md:text-left">Skill Priority</span>
                          <div className="flex items-center justify-center md:justify-start gap-4">
@@ -494,14 +515,11 @@ export default function App() {
                 </div>
               </section>
 
-              {/* ルーン選択セクション: アイコンが見えない問題を修正 */}
               <section className="bg-white p-10 rounded-[3rem] shadow-2xl border-2 border-gray-300">
                 <label className="text-xs font-black text-gray-400 mb-10 block uppercase text-center border-b-2 border-gray-100 pb-6 tracking-[0.3em]">Experimental Runes</label>
                 <div className="grid grid-cols-2 gap-12">
                   <div className="border-r-2 border-gray-100 pr-10 text-center">
                     <span className="text-[10px] font-black text-[#5383e8] mb-8 block uppercase tracking-widest">Primary Path</span>
-                    
-                    {/* ルーンパス選択 (Precision, Domination etc) */}
                     <div className="flex justify-center flex-wrap gap-3 mb-12">
                        {allRunes.length > 0 ? allRunes.map((p) => (
                          <div key={p.id} className="flex flex-col items-center gap-1">
@@ -638,6 +656,14 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #5383e8; background-clip: content-box; }
         @keyframes fade-in { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
         .animate-in { animation: fade-in 1s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        /* ターゲット強調用のアニメーション */
+        @keyframes highlight-flash {
+          0% { border-color: #5383e8; box-shadow: 0 0 0px rgba(83, 131, 232, 0); }
+          50% { border-color: #5383e8; box-shadow: 0 0 50px rgba(83, 131, 232, 0.5); transform: scale(1.02); }
+          100% { border-color: #d1d5db; box-shadow: 0 0 0px rgba(83, 131, 232, 0); }
+        }
+        .animate-highlight { animation: highlight-flash 2s ease-out; }
       `}</style>
     </div>
   );
